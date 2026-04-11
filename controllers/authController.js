@@ -17,7 +17,7 @@ exports.requestOTP = async (req, res) => {
     user.otp = otp;
     user.otpExpires = otpExpires;
     await user.save();
-    // Note: Yahan par actual SMS gateway (like Twilio/Firebase) integrate hoga
+    // Note: actual SMS gateway (like Twilio/Firebase)
     console.log(`OTP for ${phoneNumber}: ${otp}`);
     res.status(200).json({ success: true, message: "OTP sent successfully" });
   } catch (error) {
@@ -25,35 +25,6 @@ exports.requestOTP = async (req, res) => {
   }
 };
 // &______________________verifyOtp______________________
-
-// exports.verifyOTP = async (req, res) => {
-//   const { phoneNumber, otp } = req.body;
-//   try {
-//     const user = await User.findOne({
-//       phoneNumber,
-//       otp,
-//       otpExpires: { $gt: Date.now() },
-//     });
-
-//     if (!user) {
-//       return res
-//         .status(400)
-//         .json({ success: false, message: "Invalid or expired OTP" });
-//     }
-//     user.otp = undefined;
-//     user.otpExpires = undefined;
-//     user.isVerified = true;
-//     await user.save();
-
-//     res.status(200).json({
-//       success: true,
-//       message: "OTP Verified",
-//       newUser: !user.fullName,
-//     });
-//   } catch (error) {
-//     res.status(500).json({ message: "Verification failed" });
-//   }
-// };
 
 exports.verifyOTP = async (req, res) => {
   const { phoneNumber, otp } = req.body;
@@ -72,31 +43,25 @@ exports.verifyOTP = async (req, res) => {
       });
     }
 
-    // 2. OTP reset karein aur verification status update karein
     user.otp = undefined;
     user.otpExpires = undefined;
     user.isVerified = true;
     await user.save();
 
-    // 3. JWT Token Generate Karein
-    // Hum payload mein userId bhej rahe hain taaki baad mein pehchan sakein
-    const token = jwt.sign(
-      { userId: user._id },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }, // 7 din ki validity (Professional standard)
-    );
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "7d",
+    });
 
     res.cookie("jwn", token, {
       httpOnly: true,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    // 4. Response bhejien
     res.status(200).json({
       success: true,
       message: "OTP Verified successfully",
-      token, // Flutter developer ise local storage mein save karega
-      newUser: !user.fullName, // Agar fullName nahi hai, toh user ko profile setup par bhejo
+      token,
+      newUser: !user.fullName,
       user: {
         id: user._id,
         phoneNumber: user.phoneNumber,
@@ -153,5 +118,42 @@ exports.createAccount = async (req, res) => {
       message: "Sorry Account not Created",
       error: error.message,
     });
+  }
+};
+// &______________________updateUserDeviceData_________________
+
+// Sirf User ka background data (Location, Device ID, FCM) update karne ke liye
+exports.updateUserDeviceData = async (req, res) => {
+  try {
+    const { phoneNumber, fcmToken, deviceId, latitude, longitude } = req.body;
+
+    // Hum phoneNumber se user dhundenge kyunki aapka purana model use unique manta hai
+    const user = await User.findOneAndUpdate(
+      { phoneNumber: phoneNumber },
+      {
+        fcmToken,
+        deviceId,
+        location: {
+          type: "Point",
+          coordinates: [parseFloat(longitude), parseFloat(latitude)],
+        },
+        lastActive: Date.now(),
+      },
+      { new: true }, // Taaki humein update ke baad ka data mile
+    );
+
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "User background data updated!",
+      data: user,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };
